@@ -10,10 +10,10 @@ import urllib.request
 import struct
 import traceback
 
-os_type = platform.system()
-if os_type == "Windows":
+OS_TYPE = platform.system()
+if OS_TYPE == "Windows":
     import winreg
-elif os_type == "Darwin":
+elif OS_TYPE == "Darwin":
     import ssl
     ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -88,13 +88,13 @@ def input_steamid():
         return SteamID.from_url(str)
         
 def get_steam_installpath():
-    if os_type == "Windows":
+    if OS_TYPE == "Windows":
         key = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
             r"SOFTWARE\Valve\Steam"
         )
         return winreg.QueryValueEx(key, "SteamPath")[0]
-    elif os_type ==  "Darwin":
+    elif OS_TYPE ==  "Darwin":
         return  os.path.expandvars('$HOME') + "/Library/Application Support/Steam"
 
 def quick_get_image_size(data):
@@ -192,9 +192,9 @@ else:
 
 steamid = client.steam_id
 print("SteamID:",steamid.as_32)
-if os_type == "Windows":
+if OS_TYPE == "Windows":
     steam_grid_path = os.path.join(steam_path,"userdata",str(steamid.as_32), r'config\grid')
-elif os_type == "Darwin":
+elif OS_TYPE == "Darwin":
     steam_grid_path = os.path.join(steam_path,"userdata",str(steamid.as_32), r'config/grid')
 if not os.path.isdir(steam_grid_path):
     os.mkdir(steam_grid_path)
