@@ -3,12 +3,19 @@ from steam.steamid import SteamID
 from steam.webapi import WebAPI
 from steam.enums import EResult
 import os,os.path
+import platform
 import re
 import json
-import winreg
 import urllib.request
 import struct
 import traceback
+
+os_type = platform.system()
+if os_type == "Windows":
+    import winreg
+elif os_type == "Darwin":
+    import ssl
+    ssl._create_default_https_context = ssl._create_unverified_context
 
 
 SGDB_API_KEY = "e7732886b6c03a829fccb9c14fff2685"
@@ -81,11 +88,14 @@ def input_steamid():
         return SteamID.from_url(str)
         
 def get_steam_installpath():
-    key = winreg.OpenKey(
-        winreg.HKEY_CURRENT_USER,
-        r"SOFTWARE\Valve\Steam"
-    )
-    return winreg.QueryValueEx(key, "SteamPath")[0]
+    if os_type == "Windows":
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"SOFTWARE\Valve\Steam"
+        )
+        return winreg.QueryValueEx(key, "SteamPath")[0]
+    elif os_type ==  "Darwin":
+        return  os.path.expandvars('$HOME') + "/Library/Application Support/Steam"
 
 def quick_get_image_size(data):
     height = -1
@@ -182,7 +192,10 @@ else:
 
 steamid = client.steam_id
 print("SteamID:",steamid.as_32)
-steam_grid_path = os.path.join(steam_path,"userdata",str(steamid.as_32), r'config\grid')
+if os_type == "Windows":
+    steam_grid_path = os.path.join(steam_path,"userdata",str(steamid.as_32), r'config\grid')
+elif os_type == "Darwin":
+    steam_grid_path = os.path.join(steam_path,"userdata",str(steamid.as_32), r'config/grid')
 if not os.path.isdir(steam_grid_path):
     os.mkdir(steam_grid_path)
 print("Steam grid path:",steam_grid_path)
