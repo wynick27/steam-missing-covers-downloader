@@ -13,6 +13,7 @@ import traceback
 import vdf
 import struct
 from collections import namedtuple
+from bs4 import BeautifulSoup
 
 OS_TYPE = platform.system()
 if OS_TYPE == "Windows":
@@ -137,7 +138,7 @@ def query_cover_for_apps(appid):
     req.add_header("Authorization", "Bearer {}".format(SGDB_API_KEY))
     jsondata = json.loads(urllib.request.urlopen(req).read().decode("utf-8"))
     return jsondata
-    
+
 def get_steamid_local(steampath):
     loginuser_path = STEAM_LOGINUSER.format(steampath)
     if os.path.isfile(loginuser_path):
@@ -255,6 +256,82 @@ def download_cover(appid,path,exclude=-1,retrycount=3):
                 return True
     return False
 
+def download_covers(appids,gridpath,namedict):
+    total_downloaded = 0
+    batch_query_data = []
+    query_size = 50
+    for index,sublist in enumerate(split_list(appids,query_size)):
+        sublist = [str(appid) for appid in sublist]
+        print('Querying covers {}-{}'.format(index*query_size+1,index*query_size+len(sublist)))
+        rst, success = retry_func(lambda:query_cover_for_apps(sublist))
+        if success and rst['success']:
+            batch_query_data.extend(rst['data'])
+        else:
+            print("Failed to retrieve cover info")
+            sys.exit(4)
+    for appid,queryresult in zip(appids,batch_query_data):
+        if not queryresult['success'] or len(queryresult['data']) == 0:
+            print("No cover found for {} {}".format(appid,namedict[appid]))
+            continue
+        queryresult = queryresult['data'][0]
+        print("Found most voted cover for {} {} by {}".format(appid,namedict[appid],queryresult["author"]["name"]))
+        print("Downloading cover {}, url: {}".format(queryresult["id"],queryresult["url"]))
+        success = download_image(queryresult['url'],gridpath,appid)       
+        if not success:     
+            print("Finding all covers for {} {}".format(appid,namedict[int(appid)]))
+            success = download_cover(appid,gridpath,queryresult['id'])
+        if success:
+            total_downloaded += 1
+    return total_downloaded
+
+
+def query_cover_for_app_html(appid):
+    req = urllib.request.Request("https://www.steamgriddb.com/api/v2/games/steam/{}".format(appid))
+    req.add_header("Authorization", "Bearer {}".format(SGDB_API_KEY))
+    try:
+        jsondata = json.loads(urllib.request.urlopen(req).read().decode("utf-8"))
+        if jsondata['success']:
+            gameid=jsondata['data']['id']
+            url = 'https://www.steamgriddb.com/game/{}'.format(gameid)
+            html = urllib.request.urlopen(url).read().decode('utf-8')
+            soup = BeautifulSoup(html)
+            result = []
+            grids = soup.select(".grid")
+            for grid in grids:
+                if len(grid.select("img.d600x900")) != 0:
+                    result.append(
+                        {
+                            'id':int(grid['data-id']),
+                            'url':grid.select('.dload')[0]['href'],
+                            'score':int(grid.select('.details .score')[0].text),
+                            'author':grid.select('.details a')[0].text
+                        }
+                    )
+            if len(result) == 0:
+                return None,grids
+            result.sort(key=lambda x:x["score"],reverse=True)
+            return result[0],len(grids)
+    except:
+        pass
+    return None,0
+    
+    
+
+def download_covers_temp(appids,gridpath,namedict):
+    total_downloaded = 0
+    for appid in appids:
+        print("Finding cover for {} {}".format(appid,namedict[appid]))
+        cover,total = query_cover_for_app_html(appid)
+        if not cover:
+            print("No cover found")
+            continue
+        
+        print("Found {} covers".format(total))
+        print("Downloading cover with highest scroe {} by {}, url: {}".format(cover["id"],cover["author"],cover["url"]))
+        success = download_image(cover["url"],gridpath,appid)
+        if success:
+            total_downloaded += 1
+    return total_downloaded
 
 def main(local_mode = True):
     try:
@@ -327,34 +404,12 @@ def main(local_mode = True):
     print("Total local covers found:",len(local_cover_appids))
     local_missing_cover_appids = missing_cover_appids - local_cover_appids
     print("Total missing covers locally:",len(local_missing_cover_appids))
-    total_downloaded = 0
-    batch_query_data = []
+    
     print("Finding covers from steamgriddb.com")
     local_missing_cover_appids = list(local_missing_cover_appids)
-    query_size = 50
-    for index,sublist in enumerate(split_list(local_missing_cover_appids,query_size)):
-        sublist = [str(appid) for appid in sublist]
-        print('Querying covers {}-{}'.format(index*query_size+1,index*query_size+len(sublist)))
-        rst, success = retry_func(lambda:query_cover_for_apps(sublist))
-        if success and rst['success']:
-            batch_query_data.extend(rst['data'])
-        else:
-            print("Failed to retrieve cover info")
-            sys.exit(4)
-    for appid,queryresult in zip(local_missing_cover_appids,batch_query_data):
-        if not queryresult['success'] or len(queryresult['data']) == 0:
-            print("No cover found for {} {}".format(appid,missing_cover_apps[appid]))
-            continue
-        queryresult = queryresult['data'][0]
-        print("Found most voted cover for {} {} by {}".format(appid,missing_cover_apps[appid],queryresult["author"]["name"]))
-        print("Downloading cover {}, url: {}".format(queryresult["id"],queryresult["url"]))
-        success = download_image(queryresult['url'],steam_grid_path,appid)       
-        if not success:     
-            print("Finding all covers for {} {}".format(appid,missing_cover_apps[int(appid)]))
-            success = download_cover(appid,steam_grid_path,queryresult['id'])
-        if success:
-            total_downloaded += 1
+    total_downloaded = download_covers_temp(local_missing_cover_appids,steam_grid_path,missing_cover_apps)
     print("Total cover downloaded:",total_downloaded)
+
 
 if __name__ == "__main__":
     main() 

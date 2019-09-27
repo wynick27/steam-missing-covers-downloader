@@ -9,6 +9,7 @@ Covers downloaded from steamgriddb.com
 
 Python 3
 Libraries:
+BeautifulSoup
 [vdf](https://github.com/ValvePython/vdf)
 [steam](https://github.com/ValvePython/steam)
 Note: 1.0.0 required, install using the following command:
