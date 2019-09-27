@@ -8,8 +8,9 @@ Covers downloaded from steamgriddb.com
 ### Prerequisites
 
 Python 3
-
-[steam package for python](https://github.com/ValvePython/steam)
+Libraries:
+[vdf](https://github.com/ValvePython/vdf)
+[steam](https://github.com/ValvePython/steam)
 Note: 1.0.0 required, install using the following command:
 ```
 pip install git+https://github.com/ValvePython/steam#egg=steam
