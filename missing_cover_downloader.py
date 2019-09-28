@@ -6,19 +6,19 @@ import sys, os, os.path
 import platform
 import re
 import json
-import winreg
 import urllib.request
 import struct
 import traceback
 import vdf
-import struct
-from collections import namedtuple
+
 from bs4 import BeautifulSoup
+import asyncio
+import aiohttp
 
 OS_TYPE = platform.system()
 if OS_TYPE == "Windows":
     import winreg
-elif OS_TYPE == "Darwin":
+elif OS_TYPE == "Darwin" or OS_TYPE == "Linux":
     import ssl
     ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -33,22 +33,6 @@ STEAM_CLIENTCONFIG = "{}/userdata/{}/7/remote/sharedconfig.vdf"
 STEAM_USERCONFIG = "{}/userdata/{}/config/localconfig.vdf"
 
 
-def get_owned_packages(client):
-    timeout = 30
-    for i in range(timeout):
-        if len(client.licenses) == 0:
-            client.sleep(1)
-        else:
-            break
-    return list(client.licenses.keys())
-    
-def get_missing_cover_apps(apps):  
-    rst = {}
-    for appid,app in apps.items():
-        if "common" in app and app["common"]["type"] == "Game" and not "library_assets" in app["common"]:
-            rst[int(appid)] = app["common"]["name"]
-    return rst
-    
 def split_list(l,n):
     for i in range(0,len(l),n):
         yield l[i:i+n]
@@ -62,99 +46,19 @@ def retry_func(func,errorhandler=print,retry=3):
             errorhandler(ex)
             continue
     return None,False
+
+
+async def retry_func_async(func,errorhandler=print,retry=3):
+    for i in range(retry):
+        try:
+            rst = await func()
+            return rst,True
+        except Exception as ex:
+            errorhandler(ex)
+            continue
+    return None,False
     
-def get_app_details(client,appids,split=200):
-    rst = {}
-    for i,sublist in enumerate(split_list(appids,split),1):
-        print("Loading app details:",i*split)
-        subrst, success = retry_func(lambda: client.get_product_info(sublist))
-        if success:
-            rst.update(subrst['apps'])
-    return rst
 
-
-
-
-def appinfo_loads(data):
-
-    # These should always be present.
-    version, universe = struct.unpack_from("<II",data,0)
-    offset = 8
-    if version != 0x07564427 and universe != 1:
-        raise ValueError("Invalid appinfo header")
-    result = {}
-    # Parsing applications
-    app_fields = namedtuple("App",'size state last_update access_token checksum change_number')
-    app_struct = struct.Struct("<3IQ20sI")
-    while True:
-        app_id = struct.unpack_from('<I',data,offset)[0]
-        offset += 4
-
-        # AppID = 0 marks the last application in the Appinfo
-        if app_id == 0:
-            break
-
-        # All fields are required.
-        app_info = app_fields._make(app_struct.unpack_from(data,offset))
-
-        offset += app_struct.size
-        size = app_info.size + 4 - app_struct.size
-        app = vdf.binary_loads(data[offset:offset+size])
-        offset += size
-
-        result[app_id] = app['appinfo']
-
-    return result
-
-
-def get_app_details_local(steampath):
-    appinfo_path = STEAM_APPINFO.format(steampath)
-    if not os.path.isfile(appinfo_path):
-        raise FileNotFoundError("appinfo.vdf not found")
-    with open(appinfo_path,"rb") as f:
-        appinfo = appinfo_loads(f.read())
-    return appinfo
-
-        
-def get_package_details(client,pkgids,split=200):
-    rst = {}
-    for i,sublist in enumerate(split_list(pkgids,split),1):
-        print("Loading package details:",i*split)
-        subrst, success = retry_func(lambda: client.get_product_info([],sublist))
-        if success:
-            rst.update(subrst['packages'])
-    return rst
-    
-    
-    
-def get_appids_from_packages(packages):
-    rst = set()
-    for pkgid,pkg in packages.items():
-        rst = rst | {appid for k,appid in pkg['appids'].items()}
-    return list(rst)
-    
-def query_cover_for_apps(appid):
-    req = urllib.request.Request("https://www.steamgriddb.com/api/v2/grids/steam/{}?styles=alternate".format(','.join(appid) if isinstance(appid, list) else appid))
-    req.add_header("Authorization", "Bearer {}".format(SGDB_API_KEY))
-    jsondata = json.loads(urllib.request.urlopen(req).read().decode("utf-8"))
-    return jsondata
-
-def get_steamid_local(steampath):
-    loginuser_path = STEAM_LOGINUSER.format(steampath)
-    if os.path.isfile(loginuser_path):
-        with open(loginuser_path) as f:
-            login_user = vdf.load(f)
-        login_steamids = list(login_user['users'].keys())
-        if len(login_steamids) == 1:
-            return int(login_steamids[0])
-        elif len(login_steamids) == 0:
-            return None
-        else:
-            for id,value in login_user.items():
-                if value.get("mostrecent") == 1:
-                    return int(id)
-            return int(login_steamids[0])
-    
 def input_steamid():
     str = input("Enter steamid or profile url:")
     try:
@@ -162,15 +66,173 @@ def input_steamid():
     except ValueError:
         return SteamID.from_url(str)
         
-def get_steam_installpath():
-    if OS_TYPE == "Windows":
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"SOFTWARE\Valve\Steam"
-        )
-        return winreg.QueryValueEx(key, "SteamPath")[0]
-    elif OS_TYPE ==  "Darwin":
-        return  os.path.expandvars('$HOME') + "/Library/Application Support/Steam"
+class SteamDataReader(object): 
+
+    @staticmethod
+    def get_steam_installpath():
+        if OS_TYPE == "Windows":
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"SOFTWARE\Valve\Steam"
+            )
+            return winreg.QueryValueEx(key, "SteamPath")[0]
+        elif OS_TYPE ==  "Darwin":
+            return  os.path.expandvars('$HOME') + "/Library/Application Support/Steam"
+        elif OS_TYPE ==  "Linux":
+            return  os.path.expandvars('$HOME') + "/.steam/steam"
+
+    
+    def get_appids_from_packages(self,packages):
+        rst = set()
+        for pkgid,pkg in packages.items():
+            rst = rst | {appid for k,appid in pkg['appids'].items()}
+        return list(rst)
+
+
+    def get_missing_cover_dict_from_app_details(self,apps):  
+        rst = {}
+        for appid,app in apps.items():
+            if "common" in app and app["common"]["type"].lower() == "game" and not "library_assets" in app["common"]:
+                rst[int(appid)] = app["common"]["name"]
+        return rst
+
+    def get_app_details(self,packages):
+        return {}
+
+    def get_package_details(self,apps):
+        return {}
+
+    def get_owned_packages(self):
+        return []
+    
+    def get_missing_cover_app_dict(self,usedb=True):
+        
+        owned_packageids = self.get_owned_packages()
+        print("Total packages in library:",len(owned_packageids))
+        print("Retriving package details")
+        owned_packages = self.get_package_details(owned_packageids)
+        print("Retriving apps in packages")
+        owned_appids = self.get_appids_from_packages(owned_packages)
+        print("Total apps in library:",len(owned_appids))
+        if usedb and os.path.exists("missingcoverdb.json"):
+            with open("missingcoverdb.json",encoding="utf-8") as f:
+                missing_cover_apps = {int(appid):value for appid,value in json.load(f).items()}
+            print("Loaded database with {} apps missing covers".format(len(missing_cover_apps)))
+            owned_appids = set(owned_appids)
+            return {appid:value for appid,value in missing_cover_apps if appid in owned_appids}
+        else:
+            print("Retriving app details")
+            owned_apps = self.get_app_details(owned_appids)
+            return self.get_missing_cover_dict_from_app_details(owned_apps)
+            
+
+class SteamDataReaderRemote(SteamDataReader):
+
+    def __init__(self,client,request_batch=200):
+        self.client = client
+        self.request_batch = request_batch
+
+    def get_steam_id(self):
+        return self.client.steam_id
+
+    def get_app_details(self,appids):
+        rst = {}
+        for i,sublist in enumerate(split_list(appids,self.request_batch)):
+            print("Loading app details: {}-{}".format(i*self.request_batch+1,i*self.request_batch+len(sublist)))
+            subrst, success = retry_func(lambda: self.client.get_product_info(sublist))
+            if success:
+                rst.update(subrst['apps'])
+        return rst
+    
+    def get_package_details(self,pkgids):
+        rst = {}
+        for i,sublist in enumerate(split_list(pkgids,self.request_batch)):
+            print("Loading package details: {}-{}".format(i*self.request_batch+1,i*self.request_batch+len(sublist)))
+            subrst, success = retry_func(lambda: self.client.get_product_info([],sublist))
+            if success:
+                rst.update(subrst['packages'])
+        return rst
+
+    def get_owned_packages(self):
+        timeout = 30
+        for i in range(timeout):
+            if len(self.client.licenses) == 0:
+                self.client.sleep(1)
+            else:
+                break
+        return list(self.client.licenses.keys())
+
+class SteamDataReaderLocal(SteamDataReader):
+
+    def __init__(self,steampath):
+        self.steam_path = steampath
+        self.appinfo = None
+        self.packageinfo = None
+
+    def get_steam_id(self):
+        loginuser_path = STEAM_LOGINUSER.format(self.steam_path)
+        if os.path.isfile(loginuser_path):
+            with open(loginuser_path,'r',encoding='utf-8') as f:
+                login_user = vdf.load(f)
+            login_steamids = list(login_user['users'].keys())
+            if len(login_steamids) == 1:
+                return SteamID(int(login_steamids[0]))
+            elif len(login_steamids) == 0:
+                return SteamID()
+            else:
+                for id,value in login_user.items():
+                    if value.get("mostrecent") == 1:
+                        return int(id)
+                return SteamID(int(login_steamids[0]))
+        
+    def get_app_details(self,appids):
+        if not self.appinfo:
+            print("Loading appinfo.vdf")
+            self.appinfo = self.load_appinfo()
+            print("Total apps in local cache",len(self.appinfo))
+        return {appid:self.appinfo[appid] for appid in appids if appid in self.appinfo}
+
+    def get_package_details(self,packageids):
+        if not self.packageinfo:
+            print("Loading packageinfo.vdf")
+            self.packageinfo = self.load_packageinfo()
+            print("Total packages in local cache",len(self.packageinfo))
+        return {packageid:self.packageinfo[packageid] for packageid in packageids if packageid in self.packageinfo}
+
+    def load_appinfo(self):
+        appinfo_path = STEAM_APPINFO.format(self.steam_path)
+        if not os.path.isfile(appinfo_path):
+            raise FileNotFoundError("appinfo.vdf not found")
+        with open(appinfo_path,"rb") as f:
+            appinfo = vdf.appinfo_loads(f.read())
+        return appinfo
+
+    def load_packageinfo(self):
+        package_info_path = STEAM_PACKAGEINFO.format(self.steam_path)
+        if not os.path.isfile(package_info_path):
+            raise FileNotFoundError("packageinfo.vdf not found")
+        with open(package_info_path,"rb") as f:
+            packageinfo = vdf.packageinfo_loads(f.read())
+        return packageinfo
+
+    def get_owned_packages(self):
+        local_config_path = STEAM_USERCONFIG.format(self.steam_path,self.get_steam_id().as_32)
+        with open(local_config_path,'r',encoding='utf-8') as f:
+            local_config = vdf.load(f)
+        return list(int(pkgid) for pkgid in local_config['UserLocalConfigStore']['Licenses'].keys())
+        
+    
+
+
+async def query_cover_for_apps(appid,session):
+    url = "https://www.steamgriddb.com/api/v2/grids/steam/{}?styles=alternate".format(','.join(appid) if isinstance(appid, list) else appid)
+    jsondata = await fetch_url(url,session,'json',headers={"Authorization": "Bearer {}".format(SGDB_API_KEY)})
+    return jsondata
+
+async def query_sgdbid_for_appid(appid,session):
+    url = "https://www.steamgriddb.com/api/v2/games/steam/{}".format(appid)
+    jsondata = await fetch_url(url,session,'json',headers={"Authorization": "Bearer {}".format(SGDB_API_KEY)})
+    return jsondata
 
 def quick_get_image_size(data):
     height = -1
@@ -214,10 +276,23 @@ def quick_get_image_size(data):
     return width, height    
 
 
-def download_image(url,gridpath,appid,retrycount=3):
+
+async def fetch_url(url, session:aiohttp.ClientSession,returntype='bin',**kwargs):
+    resp = await session.get(url,**kwargs)
+    resp.raise_for_status()
+    if returntype == 'bin':
+        return await resp.read()
+    elif returntype == 'html':
+        return await resp.text()
+    elif returntype == 'json':
+        return await resp.json()
+    raise ValueError("Unsupported return type")
+
+
+async def download_image(url,gridpath,appid,session,retrycount=3):
     try:
-        data, success = retry_func(lambda:urllib.request.urlopen(url).read(),
-                        lambda ex: print("Download error, retry"),retrycount)
+        data, success = await retry_func_async(lambda:fetch_url(url,session,'bin'),
+                        lambda ex: print("Download error: {}, retry".format(ex)),retrycount)
         if not success:
             return False
         width, height = quick_get_image_size(data)
@@ -235,10 +310,10 @@ def download_image(url,gridpath,appid,retrycount=3):
     return False
 
 
-def download_cover(appid,path,exclude=-1,retrycount=3):
+async def download_cover(appid,path,session,excludeid=-1,retrycount=3):
     
     try:
-        rst = query_cover_for_apps(appid)
+        rst = await query_cover_for_apps(appid,session)
     except :
         print("Failed to retrive cover data")
         return False
@@ -248,52 +323,70 @@ def download_cover(appid,path,exclude=-1,retrycount=3):
         covers.sort(key=lambda x:x["score"],reverse=True)
         print("Found {} covers".format(len(covers)))
         for value in covers:
-            if value["id"] == exclude:
+            if value["id"] == excludeid:
                 continue
             print("Downloading cover {} by {}, url: {}".format(value["id"],value["author"]["name"],value["url"]))
-            success = download_image(value["url"],path,appid)
+            success = await download_image(value["url"],path,appid,session)
             if success:
                 return True
     return False
 
-def download_covers(appids,gridpath,namedict):
+async def download_covers(appids,gridpath,namedict):
     total_downloaded = 0
     batch_query_data = []
     query_size = 50
-    for index,sublist in enumerate(split_list(appids,query_size)):
-        sublist = [str(appid) for appid in sublist]
-        print('Querying covers {}-{}'.format(index*query_size+1,index*query_size+len(sublist)))
-        rst, success = retry_func(lambda:query_cover_for_apps(sublist))
-        if success and rst['success']:
-            batch_query_data.extend(rst['data'])
-        else:
-            print("Failed to retrieve cover info")
-            sys.exit(4)
-    for appid,queryresult in zip(appids,batch_query_data):
-        if not queryresult['success'] or len(queryresult['data']) == 0:
-            print("No cover found for {} {}".format(appid,namedict[appid]))
-            continue
-        queryresult = queryresult['data'][0]
-        print("Found most voted cover for {} {} by {}".format(appid,namedict[appid],queryresult["author"]["name"]))
-        print("Downloading cover {}, url: {}".format(queryresult["id"],queryresult["url"]))
-        success = download_image(queryresult['url'],gridpath,appid)       
-        if not success:     
-            print("Finding all covers for {} {}".format(appid,namedict[int(appid)]))
-            success = download_cover(appid,gridpath,queryresult['id'])
-        if success:
-            total_downloaded += 1
-    return total_downloaded
+    tasks = []
+    proxies = urllib.request.getproxies()
+    result = {'total_downloaded':0}
+    if 'http' in proxies:
+        os.environ['HTTP_PROXY'] = proxies['http']
+        os.environ['HTTPS_PROXY'] = proxies['http']
+    async with aiohttp.ClientSession(trust_env=True) as session:
+        for index,sublist in enumerate(split_list(appids,query_size)):
+            sublist = [str(appid) for appid in sublist]
+            print('Querying covers {}-{}'.format(index*query_size+1,index*query_size+len(sublist)))
+            tasks.append(asyncio.create_task(retry_func_async(lambda:query_cover_for_apps(sublist,session))))
+            
+        rsts = await asyncio.gather(*tasks)
+        for rst, success in rsts:
+            if success and rst['success']:
+                batch_query_data.extend(rst['data'])
+            else:
+                print("Failed to retrieve cover info")
+                sys.exit(4)
+        async def task(appid,queryresult,downloadresult):
+            if not queryresult['success'] or len(queryresult['data']) == 0:
+                print("No cover found for {} {}".format(appid,namedict[appid]))
+                return
+            queryresult = queryresult['data'][0]
+            print("Found most voted cover for {} {} by {}".format(appid,namedict[appid],queryresult["author"]["name"]))
+            print("Downloading cover {}, url: {}".format(queryresult["id"],queryresult["url"]))
+            success = await download_image(queryresult['url'],gridpath,appid,session)       
+            if not success:     
+                print("Finding all covers for {} {}".format(appid,namedict[int(appid)]))
+                success = await download_cover(appid,gridpath,queryresult['id'])
+            if success:
+                downloadresult['total_downloaded'] += 1
+        tasks = []
+        for appid,queryresult in zip(appids,batch_query_data):
+            asyncio.create_task(task(appid,queryresult,result))
+
+        await asyncio.gather(*tasks)
+    return result['total_downloaded']
 
 
-def query_cover_for_app_html(appid):
-    req = urllib.request.Request("https://www.steamgriddb.com/api/v2/games/steam/{}".format(appid))
-    req.add_header("Authorization", "Bearer {}".format(SGDB_API_KEY))
+async def query_cover_for_app_html(appid,session):
     try:
-        jsondata = json.loads(urllib.request.urlopen(req).read().decode("utf-8"))
-        if jsondata['success']:
+        jsondata, success = await retry_func_async(lambda:query_sgdbid_for_appid(appid,session),
+                                                lambda ex: print("Error getting sgdb id for {}: {}, retry".format(appid,ex)))
+        if success and jsondata['success']:
             gameid=jsondata['data']['id']
             url = 'https://www.steamgriddb.com/game/{}'.format(gameid)
-            html = urllib.request.urlopen(url).read().decode('utf-8')
+            html, success = await retry_func_async(lambda:fetch_url(url,session,'html'),
+                                                    lambda ex: print("Error getting html {}: {}, retry".format(url,ex)))
+            if not success:
+                print("Failed to retrive grids for {} frome steamgriddb",appid)
+                return None, 0
             soup = BeautifulSoup(html)
             result = []
             grids = soup.select(".grid")
@@ -304,7 +397,7 @@ def query_cover_for_app_html(appid):
                             'id':int(grid['data-id']),
                             'url':grid.select('.dload')[0]['href'],
                             'score':int(grid.select('.details .score')[0].text),
-                            'author':grid.select('.details a')[0].text
+                            'author':grid.select('.details a')[0].text.strip()
                         }
                     )
             if len(result) == 0:
@@ -317,49 +410,71 @@ def query_cover_for_app_html(appid):
     
     
 
-def download_covers_temp(appids,gridpath,namedict):
-    total_downloaded = 0
-    for appid in appids:
-        print("Finding cover for {} {}".format(appid,namedict[appid]))
-        cover,total = query_cover_for_app_html(appid)
-        if not cover:
-            print("No cover found")
-            continue
+async def download_covers_temp(appids,gridpath,namedict):
+    
+    queue=asyncio.Queue()
+
+    proxies = urllib.request.getproxies()
+    if 'http' in proxies:
+        os.environ['HTTP_PROXY'] = proxies['http']
+        os.environ['HTTPS_PROXY'] = proxies['http']
+    
+    async with aiohttp.ClientSession(trust_env=True) as session:
+        async def get_url(sublist,queue):
+            for appid in sublist:
+                print("Finding cover for {} {}".format(appid,namedict[appid]))
+                cover,total = await query_cover_for_app_html(appid,session)
+                if not cover:
+                    print("No cover found for {} {}".format(appid,namedict[appid]))
+                    continue
+                
+                await queue.put((appid, cover, total, namedict[appid]))
+                
+        producers =  [asyncio.create_task(get_url(sublist,queue)) for sublist in split_list(appids,len(appids)//20)]
         
-        print("Found {} covers".format(total))
-        print("Downloading cover with highest scroe {} by {}, url: {}".format(cover["id"],cover["author"],cover["url"]))
-        success = download_image(cover["url"],gridpath,appid)
-        if success:
-            total_downloaded += 1
-    return total_downloaded
+        #use dict to pass by reference
+        result = {'total_downloaded':0}
+
+        async def download_img(queue,result):
+            while True:
+                appid, cover, total, name = await queue.get()
+                print("Found {} covers for {} {}".format(total,appid,name))
+                print("Downloading cover with highest scroe, id: {} score:{} by {}, url: {}".format(cover["id"],cover["score"],cover["author"],cover["url"]))
+                success = await download_image(cover["url"],gridpath,appid,session)
+                if success:
+                    result['total_downloaded'] += 1
+                queue.task_done()
+        
+        consumers = [asyncio.create_task(download_img(queue,result)) for i in range(20)]
+        await asyncio.gather(*producers)
+        await queue.join()
+        for c in consumers:
+            c.cancel()
+        
+    return result['total_downloaded']
 
 def main(local_mode = True):
     try:
-        steam_path = get_steam_installpath()
+        steam_path = SteamDataReader.get_steam_installpath()
     except:
         print("Could not find steam install path")
         sys.exit(1)
     print("Steam path:",steam_path)
-    local_mode = True
+
+    
 
     if local_mode:
+        steam_data_reader = SteamDataReaderLocal(steam_path)
         try:
-
-            steamid = SteamID(get_steamid_local(steam_path))
+            steamid = steam_data_reader.get_steam_id()
             if not steamid.is_valid():
                 steamid = SteamID(input_steamid())
             if not steamid.is_valid():
+                print("Invalid steam id")
                 sys.exit(2)
             print("SteamID:",steamid.as_32)
-            steam_grid_path = STEAM_GRIDPATH.format(steam_path,steamid.as_32)
-            if not os.path.isdir(steam_grid_path):
-                os.mkdir(steam_grid_path)
-            print("Steam grid path:",steam_grid_path)
-            print("Reading cached appinfo")
-            owned_apps = get_app_details_local(steam_path)
-            print("Total apps in library:",len(owned_apps))
-            missing_cover_apps =  get_missing_cover_apps(owned_apps)
-            missing_cover_appids = set(missing_cover_apps.keys())
+            
+            
         except Exception as error:
             print(error)
             print("Switch to remote mode")
@@ -368,49 +483,36 @@ def main(local_mode = True):
 
     if not local_mode:
         client = SteamClient()
-        owned_apps = []
         if client.cli_login() != EResult.OK:
             print("Login Error")
             sys.exit(3)
         else:
             print("Login Success")
 
+        steam_data_reader = SteamDataReaderRemote(client)
+
         steamid = client.steam_id
         print("SteamID:",steamid.as_32)
-        steam_grid_path = STEAM_GRIDPATH.format(steam_path,steamid.as_32)
-        if not os.path.isdir(steam_grid_path):
-            os.mkdir(steam_grid_path)
-        print("Steam grid path:",steam_grid_path)
-
+        
+    steam_grid_path = STEAM_GRIDPATH.format(steam_path,steamid.as_32)
+    if not os.path.isdir(steam_grid_path):
+        os.mkdir(steam_grid_path)
+    print("Steam grid path:",steam_grid_path)
+    missing_cover_app_dict =  steam_data_reader.get_missing_cover_app_dict(not local_mode)
     
-        owned_packageids = get_owned_packages(client)
-        print("Total packages in library:",len(owned_packageids))
-        owned_packages = get_package_details(client,owned_packageids)
-        print("Retriving package details")
-        owned_appids = get_appids_from_packages(owned_packages)
-        print("Total apps in library:",len(owned_appids))
-        if os.path.exists("missingcoverdb.json"):
-            with open("missingcoverdb.json",encoding="utf-8") as f:
-                missing_cover_apps = {int(appid):value for appid,value in json.load(f).items()}
-            print("Loaded database with {} apps missing covers".format(len(missing_cover_apps)))
-        else:
-            print("Getting app details")
-            owned_apps = get_app_details(client,owned_appids)
-            missing_cover_apps =  get_missing_cover_apps(owned_apps)
-        client.logout()
-        missing_cover_appids = set(missing_cover_apps.keys()) & set(owned_appids)
-    print("Total games missing cover in library:",len(missing_cover_appids))
+    print("Total games missing cover in library:",len(missing_cover_app_dict))
     local_cover_appids = {int(file[:len(file)-5]) for file in os.listdir(steam_grid_path) if re.match(r"^\d+p.(png|jpg)$",file)}
     print("Total local covers found:",len(local_cover_appids))
-    local_missing_cover_appids = missing_cover_appids - local_cover_appids
+    local_missing_cover_appids = missing_cover_app_dict.keys() - local_cover_appids
     print("Total missing covers locally:",len(local_missing_cover_appids))
     
     print("Finding covers from steamgriddb.com")
     local_missing_cover_appids = list(local_missing_cover_appids)
-    total_downloaded = download_covers_temp(local_missing_cover_appids,steam_grid_path,missing_cover_apps)
+    local_missing_cover_appids.sort()
+    
+    total_downloaded = asyncio.run(download_covers_temp(local_missing_cover_appids,steam_grid_path,missing_cover_app_dict))
     print("Total cover downloaded:",total_downloaded)
-
+    
 
 if __name__ == "__main__":
-    main() 
-    
+    main()
