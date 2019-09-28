@@ -6,7 +6,6 @@ import sys, os, os.path
 import platform
 import re
 import json
-import winreg
 import urllib.request
 import struct
 import traceback
@@ -18,7 +17,7 @@ from bs4 import BeautifulSoup
 OS_TYPE = platform.system()
 if OS_TYPE == "Windows":
     import winreg
-elif OS_TYPE == "Darwin":
+elif OS_TYPE == "Darwin" or OS_TYPE == "Linux":
     import ssl
     ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -171,6 +170,8 @@ def get_steam_installpath():
         return winreg.QueryValueEx(key, "SteamPath")[0]
     elif OS_TYPE ==  "Darwin":
         return  os.path.expandvars('$HOME') + "/Library/Application Support/Steam"
+    elif OS_TYPE ==  "Linux":
+        return  os.path.expandvars('$HOME') + "/.steam/steam"
 
 def quick_get_image_size(data):
     height = -1
