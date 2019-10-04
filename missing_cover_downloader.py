@@ -439,7 +439,7 @@ async def download_covers_temp(appids,gridpath,namedict):
             while True:
                 appid, cover, total, name = await queue.get()
                 print("Found {} covers for {} {}".format(total,appid,name))
-                print("Downloading cover with highest scroe, id: {} score:{} by {}, url: {}".format(cover["id"],cover["score"],cover["author"],cover["url"]))
+                print("Downloading cover with highest score, id: {} score:{} by {}, url: {}".format(cover["id"],cover["score"],cover["author"],cover["url"]))
                 success = await download_image(cover["url"],gridpath,appid,session)
                 if success:
                     result['total_downloaded'] += 1
