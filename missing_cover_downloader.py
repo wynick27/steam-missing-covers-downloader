@@ -486,7 +486,7 @@ def main():
         sys.exit(1)
     print("Steam path:",steam_path)
 
-    parser = argparse.ArgumentParser(description='Process some integers.')
+    parser = argparse.ArgumentParser(description='Downloads missing covers for new steam UI. Covers are downloaded from steamgriddb.com')
     parser.add_argument('-l','--local', action='store_true', dest='local_mode',
                         help='Local mode, this is the default operation.')
     parser.add_argument('-r','--remote', action='store_true', dest='remote_mode',

@@ -10,9 +10,9 @@ Covers downloaded from steamgriddb.com
 Python 3.7+
 
 Libraries:
-*BeautifulSoup
-*aiohttp
-*[steam](https://github.com/ValvePython/steam)
+
+* aiohttp
+* [steam](https://github.com/ValvePython/steam)
 Note: steam 1.0.0alpha required, PyPI only has 0.9.1
 Install using the following command:
 ```
@@ -25,19 +25,38 @@ pip install git+https://github.com/ValvePython/steam#egg=steam
 python missing_cover_downloader.py
 ```
 
+## Command Line Options
+```
+usage: missing_cover_downloader.py [-h] [-l] [-r] [-s MIN_SCORE]
+
+Downloads missing covers for new steam UI.
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -l, --local           Local mode, this is the default operation.
+  -r, --remote          Remote mode, if both local and remote are specified,
+                        will try local mode first.
+  -s MIN_SCORE, --minscore MIN_SCORE
+                        Sets min score for a cover to be downloaded.
+```
+
 ## Update History
 1.0.0 
-*Initial release
+* Initial release
 
 1.2.0
-*Add support to read data from local appcache.
-*Fixed an issue that steamgriddb stopped returning correct covers
-*Added Mac support (Thanks to [UKMeng](https://github.com/UKMeng))
+* Added support to read data from local appcache.
+* Fixed an issue that steamgriddb stopped returning correct covers
+* Added Mac support (Thanks to [UKMeng](https://github.com/UKMeng))
 
 1.5.0
-*Significantly imporves performance using asychronous requests
-*Refactored code
-*Added Linux support (Thanks to [KrystianoXPL](https://github.com/KrystianoXPL))
-*Fixed a bug that some games in library are not returned.
-*Fixed a bug that games in appcache but not in game library are returned.
+* Significantly imporves performance using asychronous requests
+* Refactored code
+* Added Linux support (Thanks to [KrystianoXPL](https://github.com/KrystianoXPL))
+* Fixed a bug that some games in library are not returned.
+* Fixed a bug that games in appcache but not in game library are returned.
 
+1.6.0
+* The script now uses SGDB API 2.3.0, which supports filtering by size. Scrapping the site is no longer needed.
+* Added support for switching between local and remote mode.
+* Added support to set the minimum score for a cover to be downloaded.
