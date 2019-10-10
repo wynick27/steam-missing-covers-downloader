@@ -10,8 +10,7 @@ import urllib.request
 import struct
 import traceback
 import vdf
-
-from bs4 import BeautifulSoup
+import argparse
 import asyncio
 import aiohttp
 
@@ -38,7 +37,7 @@ def split_list(l,n):
         yield l[i:i+n]
     
 def retry_func(func,errorhandler=print,retry=3):
-    for i in range(retry):
+    for _ in range(retry):
         try:
             rst = func()
             return rst,True
@@ -49,7 +48,7 @@ def retry_func(func,errorhandler=print,retry=3):
 
 
 async def retry_func_async(func,errorhandler=print,retry=3):
-    for i in range(retry):
+    for _ in range(retry):
         try:
             rst = await func()
             return rst,True
@@ -84,7 +83,7 @@ class SteamDataReader(object):
     
     def get_appids_from_packages(self,packages):
         rst = set()
-        for pkgid,pkg in packages.items():
+        for _,pkg in packages.items():
             rst = rst | {appid for k,appid in pkg['appids'].items()}
         return list(rst)
 
@@ -155,7 +154,7 @@ class SteamDataReaderRemote(SteamDataReader):
 
     def get_owned_packages(self):
         timeout = 30
-        for i in range(timeout):
+        for _ in range(timeout):
             if len(self.client.licenses) == 0:
                 self.client.sleep(1)
             else:
@@ -225,8 +224,10 @@ class SteamDataReaderLocal(SteamDataReader):
 
 
 async def query_cover_for_apps(appid,session):
-    url = "https://www.steamgriddb.com/api/v2/grids/steam/{}?styles=alternate".format(','.join(appid) if isinstance(appid, list) else appid)
+    url = "https://www.steamgriddb.com/api/v2/grids/steam/{}?dimensions=600x900".format(','.join(appid) if isinstance(appid, list) else appid)
     jsondata = await fetch_url(url,session,'json',headers={"Authorization": "Bearer {}".format(SGDB_API_KEY)})
+    if isinstance(appid, list) and jsondata['success']:
+        jsondata['data'] = zip(appid, jsondata['data'])
     return jsondata
 
 async def query_sgdbid_for_appid(appid,session):
@@ -331,8 +332,8 @@ async def download_cover(appid,path,session,excludeid=-1,retrycount=3):
                 return True
     return False
 
-async def download_covers(appids,gridpath,namedict):
-    total_downloaded = 0
+async def download_covers(appids,gridpath,namedict,min_score=None):
+    
     batch_query_data = []
     query_size = 50
     tasks = []
@@ -345,33 +346,56 @@ async def download_covers(appids,gridpath,namedict):
         for index,sublist in enumerate(split_list(appids,query_size)):
             sublist = [str(appid) for appid in sublist]
             print('Querying covers {}-{}'.format(index*query_size+1,index*query_size+len(sublist)))
-            tasks.append(asyncio.create_task(retry_func_async(lambda:query_cover_for_apps(sublist,session))))
+            query_covers = lambda lst: lambda :query_cover_for_apps(lst,session)
+            tasks.append(asyncio.create_task(retry_func_async(query_covers(sublist))))
             
         rsts = await asyncio.gather(*tasks)
         for rst, success in rsts:
             if success and rst['success']:
                 batch_query_data.extend(rst['data'])
             else:
-                print("Failed to retrieve cover info")
+                print("Failed to retorieve cover info")
                 sys.exit(4)
-        async def task(appid,queryresult,downloadresult):
-            if not queryresult['success'] or len(queryresult['data']) == 0:
-                print("No cover found for {} {}".format(appid,namedict[appid]))
-                return
-            queryresult = queryresult['data'][0]
-            print("Found most voted cover for {} {} by {}".format(appid,namedict[appid],queryresult["author"]["name"]))
-            print("Downloading cover {}, url: {}".format(queryresult["id"],queryresult["url"]))
-            success = await download_image(queryresult['url'],gridpath,appid,session)       
-            if not success:     
-                print("Finding all covers for {} {}".format(appid,namedict[int(appid)]))
-                success = await download_cover(appid,gridpath,queryresult['id'])
-            if success:
-                downloadresult['total_downloaded'] += 1
+        async def task(queue,downloadresult):
+            while True:
+                appid,queryresult = await queue.get()
+                print("Found most voted cover for {} {} by {}".format(appid,namedict[appid],queryresult["author"]["name"]))
+                print("Downloading cover {}, url: {}".format(queryresult["id"],queryresult["url"]))
+                try:
+                    success = await download_image(queryresult['url'],gridpath,appid,session)       
+                    if not success:     
+                        print("Finding all covers for {} {}".format(appid,namedict[int(appid)]))
+                        success = await download_cover(appid,gridpath,queryresult['id'])
+                    if success:
+                        downloadresult['total_downloaded'] += 1
+                except Exception as ex:
+                    print(ex)
+                queue.task_done()
         tasks = []
-        for appid,queryresult in zip(appids,batch_query_data):
-            asyncio.create_task(task(appid,queryresult,result))
+        queue=asyncio.Queue()
 
-        await asyncio.gather(*tasks)
+        number_jobs = 0
+
+        for appid,queryresult in batch_query_data:
+            appid = int(appid)
+            if not queryresult['success']:
+                print("Error finding cover for {}, {}".format(appid,' '.join(queryresult['errors'])))
+            elif len(queryresult['data']) == 0:
+                print("No cover found for {} {}".format(appid,namedict[appid]))
+            elif min_score!= None and queryresult['data'][0]['score'] < min_score:
+                print("Most voted cover for {} {} has score of {} < {} , skipping.".format(appid,namedict[appid],queryresult['data'][0]['score'],min_score))
+            else:
+                number_jobs += 1
+                queue.put_nowait((appid,queryresult['data'][0]))
+
+        if number_jobs:
+            print("Found {} covers, downloading...".format(number_jobs))
+
+        consumers = [asyncio.create_task(task(queue,result)) for i in range(20)]
+        
+        await queue.join()
+        for c in consumers:
+            c.cancel()
     return result['total_downloaded']
 
 
@@ -396,7 +420,7 @@ async def query_cover_for_app_html(appid,session):
                         {
                             'id':int(grid['data-id']),
                             'url':grid.select('.dload')[0]['href'],
-                            'score':int(grid.select('.details .score')[0].text),
+                            'score':0,
                             'author':grid.select('.details a')[0].text.strip()
                         }
                     )
@@ -411,7 +435,8 @@ async def query_cover_for_app_html(appid,session):
     
 
 async def download_covers_temp(appids,gridpath,namedict):
-    
+    from bs4 import BeautifulSoup
+
     queue=asyncio.Queue()
 
     proxies = urllib.request.getproxies()
@@ -453,7 +478,7 @@ async def download_covers_temp(appids,gridpath,namedict):
         
     return result['total_downloaded']
 
-def main(local_mode = True):
+def main():
     try:
         steam_path = SteamDataReader.get_steam_installpath()
     except:
@@ -461,7 +486,21 @@ def main(local_mode = True):
         sys.exit(1)
     print("Steam path:",steam_path)
 
-    
+    parser = argparse.ArgumentParser(description='Process some integers.')
+    parser.add_argument('-l','--local', action='store_true', dest='local_mode',
+                        help='Local mode, this is the default operation.')
+    parser.add_argument('-r','--remote', action='store_true', dest='remote_mode',
+                        help='Remote mode, if both local and remote are specified, will try local mode first.')
+    parser.add_argument('-s','--minscore',  dest='min_score', type=int, default=None,
+                        help='Sets min score for a cover to be downloaded.')
+
+    args = parser.parse_args()
+    local_mode = True
+    remote_fallback = True
+    if not args.local_mode and args.remote_mode:
+        local_mode = False
+    elif args.local_mode and not args.remote_mode:
+        remote_fallback = False
 
     if local_mode:
         steam_data_reader = SteamDataReaderLocal(steam_path)
@@ -477,8 +516,11 @@ def main(local_mode = True):
             
         except Exception as error:
             print(error)
-            print("Switch to remote mode")
-            local_mode = False
+            if remote_fallback:
+                print("Switch to remote mode")
+                local_mode = False
+            else:
+                sys.exit(2)
 
 
     if not local_mode:
@@ -510,7 +552,7 @@ def main(local_mode = True):
     local_missing_cover_appids = list(local_missing_cover_appids)
     local_missing_cover_appids.sort()
     
-    total_downloaded = asyncio.run(download_covers_temp(local_missing_cover_appids,steam_grid_path,missing_cover_app_dict))
+    total_downloaded = asyncio.run(download_covers(local_missing_cover_appids,steam_grid_path,missing_cover_app_dict,args.min_score))
     print("Total cover downloaded:",total_downloaded)
     
 
