@@ -223,8 +223,10 @@ class SteamDataReaderLocal(SteamDataReader):
     
 
 
-async def query_cover_for_apps(appid,session):
+async def query_cover_for_apps(appid,session,styles=None):
     url = "https://www.steamgriddb.com/api/v2/grids/steam/{}?dimensions=600x900".format(','.join(appid) if isinstance(appid, list) else appid)
+    if styles:
+        url = f'{url}&styles={styles}'
     jsondata = await fetch_url(url,session,'json',headers={"Authorization": "Bearer {}".format(SGDB_API_KEY)})
     if isinstance(appid, list) and jsondata['success']:
         jsondata['data'] = zip(appid, jsondata['data'])
@@ -311,10 +313,10 @@ async def download_image(url,gridpath,appid,session,retrycount=3):
     return False
 
 
-async def download_cover(appid,path,session,excludeid=-1,retrycount=3):
+async def download_cover(appid,path,session,args,excludeid=-1,retrycount=3):
     
     try:
-        rst = await query_cover_for_apps(appid,session)
+        rst = await query_cover_for_apps(appid,session,args.styles)
     except :
         print("Failed to retrive cover data")
         return False
@@ -332,7 +334,7 @@ async def download_cover(appid,path,session,excludeid=-1,retrycount=3):
                 return True
     return False
 
-async def download_covers(appids,gridpath,namedict,min_score=None):
+async def download_covers(appids,gridpath,namedict,args):
     
     batch_query_data = []
     query_size = 50
@@ -346,7 +348,7 @@ async def download_covers(appids,gridpath,namedict,min_score=None):
         for index,sublist in enumerate(split_list(appids,query_size)):
             sublist = [str(appid) for appid in sublist]
             print('Querying covers {}-{}'.format(index*query_size+1,index*query_size+len(sublist)))
-            query_covers = lambda lst: lambda :query_cover_for_apps(lst,session)
+            query_covers = lambda lst: lambda :query_cover_for_apps(lst,session,args.styles)
             tasks.append(asyncio.create_task(retry_func_async(query_covers(sublist))))
             
         rsts = await asyncio.gather(*tasks)
@@ -354,7 +356,7 @@ async def download_covers(appids,gridpath,namedict,min_score=None):
             if success and rst['success']:
                 batch_query_data.extend(rst['data'])
             else:
-                print("Failed to retorieve cover info")
+                print("Failed to retrieve cover info")
                 sys.exit(4)
         async def task(queue,downloadresult):
             while True:
@@ -365,7 +367,7 @@ async def download_covers(appids,gridpath,namedict,min_score=None):
                     success = await download_image(queryresult['url'],gridpath,appid,session)       
                     if not success:     
                         print("Finding all covers for {} {}".format(appid,namedict[int(appid)]))
-                        success = await download_cover(appid,gridpath,queryresult['id'])
+                        success = await download_cover(appid,gridpath,queryresult['id'],args)
                     if success:
                         downloadresult['total_downloaded'] += 1
                 except Exception as ex:
@@ -382,8 +384,8 @@ async def download_covers(appids,gridpath,namedict,min_score=None):
                 print("Error finding cover for {}, {}".format(appid,' '.join(queryresult['errors'])))
             elif len(queryresult['data']) == 0:
                 print("No cover found for {} {}".format(appid,namedict[appid]))
-            elif min_score!= None and queryresult['data'][0]['score'] < min_score:
-                print("Most voted cover for {} {} has score of {} < {} , skipping.".format(appid,namedict[appid],queryresult['data'][0]['score'],min_score))
+            elif args.min_score!= None and queryresult['data'][0]['score'] < args.min_score:
+                print("Most voted cover for {} {} has score of {} < {} , skipping.".format(appid,namedict[appid],queryresult['data'][0]['score'],args.min_score))
             else:
                 number_jobs += 1
                 queue.put_nowait((appid,queryresult['data'][0]))
@@ -491,8 +493,14 @@ def main():
                         help='Local mode, this is the default operation.')
     parser.add_argument('-r','--remote', action='store_true', dest='remote_mode',
                         help='Remote mode, if both local and remote are specified, will try local mode first.')
-    parser.add_argument('-s','--minscore',  dest='min_score', type=int, default=None,
-                        help='Sets min score for a cover to be downloaded.')
+    parser.add_argument('-m','--minscore',  dest='min_score', type=int, default=None,
+                        help='Set min score for a cover to be downloaded.')
+    parser.add_argument('-s','--styles',  dest='styles', type=str, default=None,
+                        help='Set styles of cover, can be comma separated list of alternate, blurred, white_logo, material or no_logo.')
+    parser.add_argument('-o','--overwrite', action='store_true', dest='overwrite',
+                        help='Overwrite covers that are already present in local steam grid path.')
+    parser.add_argument('-d','--delete-local', action='store_true', dest='delete_local',
+                        help='Delete local covers for games that already have official ones.')
 
     args = parser.parse_args()
     local_mode = True
@@ -543,16 +551,28 @@ def main():
     missing_cover_app_dict =  steam_data_reader.get_missing_cover_app_dict(not local_mode)
     
     print("Total games missing cover in library:",len(missing_cover_app_dict))
-    local_cover_appids = {int(file[:len(file)-5]) for file in os.listdir(steam_grid_path) if re.match(r"^\d+p.(png|jpg)$",file)}
+    local_cover_map = {int(file[:len(file)-5]):file for file in os.listdir(steam_grid_path) if re.match(r"^\d+p.(png|jpg)$",file)}
+    local_cover_appids = set(local_cover_map.keys())
     print("Total local covers found:",len(local_cover_appids))
     local_missing_cover_appids = missing_cover_app_dict.keys() - local_cover_appids
     print("Total missing covers locally:",len(local_missing_cover_appids))
+    if args.overwrite:
+        local_missing_cover_appids = set(missing_cover_app_dict.keys())
+
+    if args.delete_local:
+        local_duplicate_cover_appids = local_cover_appids - missing_cover_app_dict.keys()
+        print(f'Found {len(local_duplicate_cover_appids)} games already have official covers.')
+        for appid in local_duplicate_cover_appids:
+            path = os.path.join(steam_grid_path,local_cover_map[appid])
+            print(f'Deleting file {path}')
+            os.remove(path)
+
     
     print("Finding covers from steamgriddb.com")
     local_missing_cover_appids = list(local_missing_cover_appids)
     local_missing_cover_appids.sort()
     
-    total_downloaded = asyncio.run(download_covers(local_missing_cover_appids,steam_grid_path,missing_cover_app_dict,args.min_score))
+    total_downloaded = asyncio.run(download_covers(local_missing_cover_appids,steam_grid_path,missing_cover_app_dict,args))
     print("Total cover downloaded:",total_downloaded)
     
 

@@ -25,19 +25,28 @@ pip install git+https://github.com/ValvePython/steam#egg=steam
 python missing_cover_downloader.py
 ```
 
-## Command Line Options
+#### Command Line Options
 ```
-usage: missing_cover_downloader.py [-h] [-l] [-r] [-s MIN_SCORE]
+usage: missing_cover_downloader.py [-h] [-l] [-r] [-m MIN_SCORE] [-s STYLES]
+                                   [-o] [-d]
 
-Downloads missing covers for new steam UI.
+Downloads missing covers for new steam UI. Covers are downloaded from
+steamgriddb.com
 
 optional arguments:
   -h, --help            show this help message and exit
   -l, --local           Local mode, this is the default operation.
   -r, --remote          Remote mode, if both local and remote are specified,
                         will try local mode first.
-  -s MIN_SCORE, --minscore MIN_SCORE
-                        Sets min score for a cover to be downloaded.
+  -m MIN_SCORE, --minscore MIN_SCORE
+                        Set min score for a cover to be downloaded.
+  -s STYLES, --styles STYLES
+                        Set styles of cover, can be comma separated list of
+                        alternate, blurred, white_logo, material or no_logo.
+  -o, --overwrite       Overwrite covers that are already present in local
+                        steam grid path.
+  -d, --delete-local    Delete local covers for games that already have
+                        official ones.
 ```
 
 ## Update History
