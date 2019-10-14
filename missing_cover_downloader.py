@@ -108,9 +108,9 @@ class SteamDataReader(object):
         
         owned_packageids = self.get_owned_packages()
         print("Total packages in library:",len(owned_packageids))
-        print("Retriving package details")
+        print("Retrieving package details")
         owned_packages = self.get_package_details(owned_packageids)
-        print("Retriving apps in packages")
+        print("Retrieving apps in packages")
         owned_appids = self.get_appids_from_packages(owned_packages)
         print("Total apps in library:",len(owned_appids))
         if usedb and os.path.exists("missingcoverdb.json"):
@@ -120,7 +120,7 @@ class SteamDataReader(object):
             owned_appids = set(owned_appids)
             return {appid:value for appid,value in missing_cover_apps if appid in owned_appids}
         else:
-            print("Retriving app details")
+            print("Retrieving app details")
             owned_apps = self.get_app_details(owned_appids)
             return self.get_missing_cover_dict_from_app_details(owned_apps)
             
@@ -318,7 +318,7 @@ async def download_cover(appid,path,session,args,excludeid=-1,retrycount=3):
     try:
         rst = await query_cover_for_apps(appid,session,args.styles)
     except :
-        print("Failed to retrive cover data")
+        print("Failed to retrieve cover data")
         return False
     if rst["success"]:
         # sort by score
@@ -411,7 +411,7 @@ async def query_cover_for_app_html(appid,session):
             html, success = await retry_func_async(lambda:fetch_url(url,session,'html'),
                                                     lambda ex: print("Error getting html {}: {}, retry".format(url,ex)))
             if not success:
-                print("Failed to retrive grids for {} frome steamgriddb",appid)
+                print("Failed to retrieve grids for {} from steamgriddb",appid)
                 return None, 0
             soup = BeautifulSoup(html)
             result = []
