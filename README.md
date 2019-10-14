@@ -69,3 +69,8 @@ optional arguments:
 * The script now uses SGDB API 2.3.0, which supports filtering by size. Scrapping the site is no longer needed.
 * Added support for switching between local and remote mode.
 * Added support to set the minimum score for a cover to be downloaded.
+
+1.6.2
+* Added option to overwrite existing covers.
+* Added option to select cover styles.
+* Added option to delete custom covers when official covers are available.
