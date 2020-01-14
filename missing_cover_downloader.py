@@ -216,7 +216,7 @@ class SteamDataReaderLocal(SteamDataReader):
 
     def get_owned_packages(self):
         local_config_path = STEAM_USERCONFIG.format(self.steam_path,self.get_steam_id().as_32)
-        with open(local_config_path,'r',encoding='utf-8') as f:
+        with open(local_config_path,'r',encoding='utf-8',errors='replace') as f:
             local_config = vdf.load(f)
         return list(int(pkgid) for pkgid in local_config['UserLocalConfigStore']['Licenses'].keys())
         
