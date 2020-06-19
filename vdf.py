@@ -502,7 +502,7 @@ def packageinfo_loads(data):
     # These should always be present.
     version, universe = struct.unpack_from("<II",data,0)
     offset = 8
-    if version != 0x06565527 and universe != 1:
+    if version != 0x06565528 and universe != 1:
         raise ValueError("Invalid package header")
     result = {}
     # Parsing applications
