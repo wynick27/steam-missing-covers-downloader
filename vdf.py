@@ -324,6 +324,7 @@ def binary_loads_at(s, idx=0, mapper=dict, merge_duplicate_keys=True, alt_format
             except:
                 result = result.decode('utf-8', 'replace')
         return result, end + (2 if wide else 1)
+
     stack = [mapper()]
     
     CURRENT_BIN_END = BIN_END if not alt_format else BIN_END_ALT
@@ -331,7 +332,7 @@ def binary_loads_at(s, idx=0, mapper=dict, merge_duplicate_keys=True, alt_format
     while len(s) > idx:
         t = s[idx:idx+1]
         idx += 1
-        
+
         if t == CURRENT_BIN_END:
             if len(stack) > 1:
                 stack.pop()
@@ -497,10 +498,11 @@ def appinfo_loads(data):
 
 
 def packageinfo_loads(data):
+
     # These should always be present.
     version, universe = struct.unpack_from("<II",data,0)
     offset = 8
-    if version != 0x06565528 and universe != 1:
+    if version != 0x06565527 and universe != 1:
         raise ValueError("Invalid package header")
     result = {}
     # Parsing applications
@@ -519,7 +521,9 @@ def packageinfo_loads(data):
         package = package_fields._make(package_struct.unpack_from(data,offset))
 
         offset += package_struct.size
+        
         offset += pics_struct.size
+        
         package, offset = binary_loads_at(data,offset)
 
         result[package_id] = package[str(package_id)]
