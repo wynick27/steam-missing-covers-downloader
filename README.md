@@ -13,10 +13,11 @@ Libraries:
 
 * aiohttp
 * [steam](https://github.com/ValvePython/steam)
-Note: steam 1.0.0alpha required, PyPI only has 0.9.1
-Install using the following command:
+
+Install using the commands:
 ```
-pip install git+https://github.com/ValvePython/steam#egg=steam
+pip install aiohttp
+pip install steam
 ```
 
 ### Running

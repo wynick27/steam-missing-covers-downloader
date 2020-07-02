@@ -502,12 +502,13 @@ def packageinfo_loads(data):
     # These should always be present.
     version, universe = struct.unpack_from("<II",data,0)
     offset = 8
-    if version != 0x06565527 and universe != 1:
+    if version != 0x06565528 and universe != 1:
         raise ValueError("Invalid package header")
     result = {}
     # Parsing applications
     package_fields = namedtuple("Package",'checksum change_number')
     package_struct = struct.Struct("<20sI")
+    pics_struct = struct.Struct("<Q")
     while True:
         package_id = struct.unpack_from('<I',data,offset)[0]
         offset += 4
@@ -520,6 +521,8 @@ def packageinfo_loads(data):
         package = package_fields._make(package_struct.unpack_from(data,offset))
 
         offset += package_struct.size
+        
+        offset += pics_struct.size
         
         package, offset = binary_loads_at(data,offset)
 
