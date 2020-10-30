@@ -54,17 +54,11 @@ optional arguments:
 
 ## Troubleshooting
 
-- `ModuleNotFoundError: No module named 'google'`: check if `protobuf` Python library is installed via `pip list`, if not, run
-
-`pip install protobuf`
-
-- `File "asyncio\base_events.py", line 508, in _check_closed`\
-
-  `RuntimeError: Event loop is closed`: Too many images needed to download at once? Try grabbing some images manually from `steamgriddb.com`, and placing them in `Steam\userdata\[user id]\config\grid`\
-
-  Also try running `missing_cover_downloader.py` with the `-m` argument. Start at `20` and work down (so `missing_cover_downloader.py -m 20`, then `missing_cover_downloader.py -m 15`, etc.)
-
-- `Cannot connect to host www.steamgriddb.com:443 ssl:default`: Your proxy settings may be preventing you from downloading images from steamgriddb. In Windows, go to *Internet Options -> Connections -> LAN settings -> Automatic configuration* and check *Automatically detect settings* and under *Proxy Server* uncheck *Use a proxy server for your LAN* 
+| Error                                                        | Solution                                                     |
+| ------------------------------------------------------------ | ------------------------------------------------------------ |
+| `ModuleNotFoundError: No module named 'google'`              | Check if `protobuf` Python library is installed via `pip list`, if not, run `pip install protobuf` |
+| `File "asyncio\base_events.py", line 508, in _check_closed`<br>`RuntimeError: Event loop is closed` | Too many images needed to download at once? <br>Try grabbing some images manually from `steamgriddb.com`, and placing them in `Steam\userdata\[user id]\config\grid`<br>Also try running `missing_cover_downloader.py` with the `-m` argument. Start at `20` and work down (so `missing_cover_downloader.py -m 20`, then `missing_cover_downloader.py -m 15`, etc.) |
+| `Cannot connect to host www.steamgriddb.com:443 ssl:default` | Your proxy settings may be preventing you from downloading images from steamgriddb.<br> In Windows, go to *Internet Options -> Connections -> LAN settings*. <br> Under *Automatic configuration*, check *Automatically detect settings* <br> Under *Proxy Server* uncheck *Use a proxy server for your LAN* |
 
 ## Update History
 
