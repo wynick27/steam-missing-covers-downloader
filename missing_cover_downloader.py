@@ -13,6 +13,7 @@ import vdf
 import argparse
 import asyncio
 import aiohttp
+import license_parser
 
 OS_TYPE = platform.system()
 if OS_TYPE == "Windows":
@@ -215,10 +216,13 @@ class SteamDataReaderLocal(SteamDataReader):
         return packageinfo
 
     def get_owned_packages(self):
-        local_config_path = STEAM_USERCONFIG.format(self.steam_path,self.get_steam_id().as_32)
-        with open(local_config_path,'r',encoding='utf-8',errors='replace') as f:
-            local_config = vdf.load(f)
-        return list(int(pkgid) for pkgid in local_config['UserLocalConfigStore']['Licenses'].keys())
+        steamid32 = self.get_steam_id().as_32
+        license_cache_path = f"{self.steam_path}/userdata/{steamid32}/config/licensecache"
+        licenses = license_parser.parse(license_cache_path, steamid32).licenses
+        #local_config_path = STEAM_USERCONFIG.format(self.steam_path,self.get_steam_id().as_32)
+        #with open(local_config_path,'r',encoding='utf-8',errors='replace') as f:
+        #    local_config = vdf.load(f)
+        return [package.package_id for package in licenses]
         
     
 
