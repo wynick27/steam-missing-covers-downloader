@@ -18,6 +18,7 @@ import license_parser
 OS_TYPE = platform.system()
 if OS_TYPE == "Windows":
     import winreg
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 elif OS_TYPE == "Darwin" or OS_TYPE == "Linux":
     import ssl
     ssl._create_default_https_context = ssl._create_unverified_context
@@ -31,7 +32,6 @@ STEAM_APPINFO =  "{}/appcache/appinfo.vdf"
 STEAM_PACKAGEINFO = "{}/appcache/packageinfo.vdf"
 STEAM_CLIENTCONFIG = "{}/userdata/{}/7/remote/sharedconfig.vdf"
 STEAM_USERCONFIG = "{}/userdata/{}/config/localconfig.vdf"
-
 
 def split_list(l,n):
     for i in range(0,len(l),n):
