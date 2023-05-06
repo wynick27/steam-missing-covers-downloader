@@ -485,14 +485,10 @@ async def download_covers_temp(appids,gridpath,namedict):
     return result['total_downloaded']
 
 def main():
-    try:
-        steam_path = SteamDataReader.get_steam_installpath()
-    except:
-        print("Could not find steam install path")
-        sys.exit(1)
-    print("Steam path:",steam_path)
 
     parser = argparse.ArgumentParser(description='Downloads missing covers for new steam UI. Covers are downloaded from steamgriddb.com')
+    parser.add_argument('-p','--path', dest='steam_path', type=str, default=None,
+                        help='Set Steam installation path.')
     parser.add_argument('-l','--local', action='store_true', dest='local_mode',
                         help='Local mode, this is the default operation.')
     parser.add_argument('-r','--remote', action='store_true', dest='remote_mode',
@@ -507,6 +503,17 @@ def main():
                         help='Delete local covers for games that already have official ones.')
 
     args = parser.parse_args()
+    
+    try:
+        if args.steam_path:
+            steam_path = args.steam_path
+        else:
+            steam_path = SteamDataReader.get_steam_installpath()
+    except:
+        print("Could not find steam install path")
+        sys.exit(1)
+    print("Steam path:",steam_path)
+    
     local_mode = True
     remote_fallback = True
     if not args.local_mode and args.remote_mode:
