@@ -474,8 +474,8 @@ def appinfo_loads(data):
         raise ValueError("Invalid appinfo header")
     result = {}
     # Parsing applications
-    app_fields = namedtuple("App",'size state last_update access_token checksum change_number')
-    app_struct = struct.Struct("<3IQ20sI")
+    app_fields = namedtuple("App",'size state last_update access_token checksum change_number checksum2')
+    app_struct = struct.Struct("<3IQ20sI20s")
     while True:
         app_id = struct.unpack_from('<I',data,offset)[0]
         offset += 4
